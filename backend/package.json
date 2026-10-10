@@ -1,0 +1,28 @@
+{
+  "name": "hindusthan-department-erp-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hindusthan Department ERP REST API - Express + JWT RBAC + Google Apps Script bridge",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "\node src/server.js",
+    "dev": "node --watch src/server.js",
+    "check": "node scripts/check-syntax.js && node scripts/check-schema-migration.js && node scripts/check-bridge-contract.js",
+    "test": "node scripts/self-test.js",
+    "bridge:check": "node scripts/check-bridge.js",
+    "fix:materials": "node scripts/patch-materials-defaults.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.4",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.3.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.1"
+  }
+}

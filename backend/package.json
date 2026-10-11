@@ -5,7 +5,7 @@
   "description": "Hindusthan Department ERP REST API - Express + JWT RBAC + Google Apps Script bridge",
   "main": "src/server.js",
   "scripts": {
-    "start": "\node src/server.js",
+    "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "check": "node scripts/check-syntax.js && node scripts/check-schema-migration.js && node scripts/check-bridge-contract.js",
     "test": "node scripts/self-test.js",

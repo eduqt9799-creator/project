@@ -7,6 +7,7 @@ const { verifyPasswordLegacyAware } = require('../services/passwordHash');
 const { signToken, ROLE_PRIORITY, authenticateUser } = require('../middleware/auth');
 const { asyncHandler, badRequest } = require('../middleware/error');
 const { validate, SPECS } = require('../utils/validate');
+const { SINGLE_DEPARTMENT } = require('../config/department');
 
 const loginLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
@@ -44,36 +45,39 @@ const findProfile = (all, user) => {
  */
 const loadProfile = async (user) => {
   const role = String(user.role || '').toLowerCase();
-  // Only an account that actually belongs to a department needs the department
-  // table. Administrators have no departmentId, and skipping that read removes a
-  // second 6-24s bridge call from the sign-in path.
-  const [students, faculty, hods, departments] = await Promise.all([
+  // Only the profile table the signed-in role needs is read; the department is a
+  // deployment constant now, so it needs no bridge round-trip at all. Fetching
+  // all five tables used to add 6-24s to every sign-in and broke entirely on
+  // deployments that have no HODs sheet, even for an admin who can never be one.
+  const [students, faculty, hods] = await Promise.all([
     role === 'student' ? dataService.students() : [],
     role === 'faculty' ? dataService.faculty() : [],
     role === 'hod' ? dataService.hods() : [],
-    user.departmentId ? dataService.departments() : [],
   ]);
-  const department = departments.find((d) => String(d.departmentId || '') === String(user.departmentId || '')) || null;
   const profile = findProfile({ students, faculty, hods }, user);
-  return { user, department, profile };
+  return { user, profile };
 };
 
 const buildProfileResponse = async (user) => {
-  const { department, profile } = await loadProfile(user);
+  const { profile } = await loadProfile(user);
   const record = profile ? profile.record : null;
+  // The deployment has one department: every non-admin account is shown as the
+  // canonical department, regardless of any legacy department value stored on
+  // the row (the migration rewrites those, this keeps the UI correct meanwhile).
+  const isAdmin = String(user.role || '').toLowerCase() === 'admin';
   const base = {
     ...publicUser(user),
+    departmentId: isAdmin ? '' : SINGLE_DEPARTMENT.departmentId,
+    departmentName: isAdmin ? '' : SINGLE_DEPARTMENT.departmentName,
     phone: record ? record.phone || '' : user.phone || '',
     registerNumber: record ? record.registerNumber || '' : '',
     employeeId: record ? record.employeeId || '' : '',
     semester: record && record.semester !== undefined ? Number(record.semester) : null,
     batch: record ? record.batch || '' : '',
     designation: record ? record.designation || '' : '',
-    department: department
-      ? { departmentId: department.departmentId, departmentCode: department.departmentCode, departmentName: department.departmentName }
-      : user.departmentId
-        ? { departmentId: user.departmentId, departmentCode: '', departmentName: user.departmentName || '' }
-        : null,
+    department: isAdmin
+      ? null
+      : { departmentId: SINGLE_DEPARTMENT.departmentId, departmentCode: SINGLE_DEPARTMENT.departmentCode, departmentName: SINGLE_DEPARTMENT.departmentName },
   };
   return base;
 };

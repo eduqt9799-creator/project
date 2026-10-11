@@ -11,6 +11,7 @@
  */
 const fs = require('fs');
 const vm = require('vm');
+const crypto = require('crypto');
 
 class FakeSheet {
   constructor(name) {
@@ -92,6 +93,9 @@ class FakeSheet {
 function makeSandbox(sheetsByName) {
   const store = { SPREADSHEET_ID: 'test-spreadsheet-id', API_KEY: 'test-key' };
   const sandbox = {
+    // Captured by the ContentService stub below so tests can assert on a bridge
+    // response body (e.g. doPost returning ok_/fail_ payloads).
+    __lastOutput: '',
     console,
     SpreadsheetApp: {
       openById: () => ({
@@ -103,11 +107,23 @@ function makeSandbox(sheetsByName) {
     Utilities: {
       getUuid: () => `uuid-${Math.random().toString(16).slice(2)}`,
       formatDate: () => '2026-10-04|10|30',
-      computeHmacSha256Signature: () => 'sig',
+      // Real HMAC-SHA256 so bootstrapHash_ can be checked against the backend's
+      // verifyPassword(). Apps Script returns a signed byte array; mirror that.
+      computeHmacSha256Signature: (value, key) =>
+        Array.from(
+          crypto
+            .createHmac('sha256', key)
+            .update(typeof value === 'string' ? Buffer.from(value, 'ascii') : Buffer.from(value))
+            .digest()
+        ),
+      base64Encode: (bytes) => Buffer.from((bytes || []).map((b) => (b + 256) % 256)).toString('base64'),
       Charset: { US_ASCII: 'US_ASCII' },
     },
     ContentService: {
-      createTextOutput: () => ({ setMimeType: () => {} }),
+      createTextOutput: () => ({
+        setMimeType: function () { return this; },
+        setContent: function (c) { sandbox.__lastOutput = c; return this; },
+      }),
       MimeType: { JSON: 'json' },
     },
   };

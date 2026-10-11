@@ -1,16 +1,24 @@
 const router = require('express').Router();
 const dataService = require('../services/dataService');
 const appsScript = require('../services/appsScriptClient');
-const { validate, SPECS } = require('../utils/validate');
-const { asyncHandler, badRequest, forbidden, notFound } = require('../middleware/error');
+const { asyncHandler } = require('../middleware/error');
 const { byName } = require('../utils/naturalSort');
 const { requireRole } = require('../middleware/auth');
+const { SINGLE_DEPARTMENT } = require('../config/department');
 
 /**
- * Departments are reference data.
- * Every authenticated user may read them (labels / admin filter dropdown),
- * but only an administrator may create, update or remove them.
+ * The ERP serves exactly one department (Computer Science and Engineering,
+ * CS01). The department is a deployment constant, not user-managed data: the
+ * endpoint is read-only and every account is pinned to the same values. The
+ * one-time migration route rewrites any legacy department rows in Google Sheets.
  */
+const readOnly = (res) =>
+  res.status(400).json({
+    success: false,
+    message: `This ERP uses a single department (${SINGLE_DEPARTMENT.departmentName}). Departments cannot be added, renamed or removed.`,
+    data: SINGLE_DEPARTMENT,
+  });
+
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -25,118 +33,40 @@ router.get(
   })
 );
 
+/**
+ * POST /api/departments/migrate — one-time, administrator-only migration.
+ * The Apps Script bridge reassigns every department-scoped row to CS01 and
+ * collapses the Departments sheet to a single row. It is idempotent.
+ */
 router.post(
-  '/',
+  '/migrate',
   requireRole('admin'),
   asyncHandler(async (req, res) => {
-    const { errors, data } = validate(req.body, SPECS.department);
-    if (Object.keys(errors).length) throw badRequest('Please correct the highlighted fields.', errors);
-    const existing = await dataService.departments();
-    if (existing.some((d) => String(d.departmentId).toLowerCase() === data.departmentId.toLowerCase())) {
-      throw badRequest('A department with this ID already exists.', { departmentId: 'Already in use' });
-    }
-    if (existing.some((d) => String(d.departmentCode).toLowerCase() === data.departmentCode.toLowerCase())) {
-      throw badRequest('A department with this code already exists.', { departmentCode: 'Already in use' });
-    }
-    const result = await appsScript.post('create_department', { record: data });
-    return res.status(201).json({ success: true, message: 'Department created successfully', data: result.data || data });
-  })
-);
-
-router.put(
-  '/:id',
-  requireRole('admin'),
-  asyncHandler(async (req, res) => {
-    const { errors, data } = validate(req.body, SPECS.department);
-    if (Object.keys(errors).length) throw badRequest('Please correct the highlighted fields.', errors);
-    const existing = await dataService.departments();
-    const target = String(req.params.id);
-    // This deployment keys its rows by its own generated `id`, so accept either
-    // that key or the readable departmentId/code the UI holds.
-    const row = existing.find((d) => String(d.id || '') === target || String(d.departmentId) === target);
-    if (!row) throw notFound('Department not found');
-    const sheetId = String(row.id || row.departmentId);
-    const others = existing.filter((d) => d !== row);
-    if (data.departmentId && data.departmentId !== row.departmentId) {
-      throw badRequest('Department ID cannot be changed after creation.');
-    }
-    if (others.some((d) => String(d.departmentCode).toLowerCase() === data.departmentCode.toLowerCase())) {
-      throw badRequest('A department with this code already exists.', { departmentCode: 'Already in use' });
-    }
-    const result = await appsScript.post('update_department', { id: sheetId, record: data });
-    return res.json({ success: true, message: 'Department updated successfully', data: result.data || { ...row, ...data } });
-  })
-);
-
-router.delete(
-  '/:id',
-  requireRole('admin'),
-  asyncHandler(async (req, res) => {
-    const existing = await dataService.departments();
-    const target = String(req.params.id);
-    const row = existing.find((d) => String(d.id || '') === target || String(d.departmentId) === target);
-    if (!row) throw notFound('Department not found');
-    const sheetId = String(row.id || row.departmentId);
-
-    const blockers = [];
-    const checks = [
-      ['students', 'students'],
-      ['faculty', 'faculty members'],
-      ['hods', 'HOD accounts'],
-      ['subjects', 'subjects'],
-    ];
-    // eslint-disable-next-line no-restricted-syntax
-    for (const [table, label] of checks) {
-      let rows;
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        rows = await dataService[table]();
-      } catch (error) {
-        // A table this deployment does not have cannot be holding references,
-        // so it is not a blocker. Anything else is a real failure.
-        if (error.reason === 'table_not_supported') continue;
-        throw error;
-      }
-      if (rows.some((r) => String(r.departmentId || '') === String(row.departmentId))) blockers.push(label);
-    }
-    if (req.user.role !== 'admin') throw forbidden('Only administrators can remove departments.');
-
-    if (blockers.length) {
-      await appsScript.post('update_department', { id: sheetId, record: { status: 'inactive' } });
-      await appsScript.post('audit_log', {
-        record: {
-          action: 'update',
-          resource: 'Department',
-          recordId: String(row.departmentId),
-          performedBy: req.user.userId,
-          performedByName: req.user.name,
-          performedByRole: req.user.role,
-          departmentId: '',
-          detail: `deactivated because referenced by ${blockers.join(', ')}`,
-        },
-      });
-      return res.json({
-        success: true,
-        message: `This department still contains ${blockers.join(', ')} and cannot be deleted. It has been deactivated instead.`,
-        deactivated: true,
-      });
-    }
-
-    await appsScript.post('delete_department', { id: sheetId });
+    const result = await appsScript.post('migrate_single_department', {});
     await appsScript.post('audit_log', {
       record: {
-        action: 'delete',
+        action: 'update',
         resource: 'Department',
-        recordId: String(row.departmentId),
+        recordId: SINGLE_DEPARTMENT.departmentId,
         performedBy: req.user.userId,
         performedByName: req.user.name,
         performedByRole: req.user.role,
-        departmentId: '',
-        detail: row.departmentName,
+        departmentId: SINGLE_DEPARTMENT.departmentId,
+        detail: 'Single-department migration run',
       },
     });
-    return res.json({ success: true, message: 'Department deleted successfully' });
+    return res.json({
+      success: true,
+      message: result.message || 'Single-department migration complete.',
+      data: result.data || null,
+    });
   })
 );
+
+// The single department is fixed; destructive/creative writes are refused so a
+// duplicate CSE record can never be created by accident.
+router.post('/', requireRole('admin'), asyncHandler(async (req, res) => readOnly(res)));
+router.put('/:id', requireRole('admin'), asyncHandler(async (req, res) => readOnly(res)));
+router.delete('/:id', requireRole('admin'), asyncHandler(async (req, res) => readOnly(res)));
 
 module.exports = router;

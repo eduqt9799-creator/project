@@ -95,7 +95,9 @@ const SPECS = {
     password: { label: 'Password', required: true, check: (v) => (v.length >= 8 ? true : 'Password must be at least 8 characters') },
     phone: { label: 'Phone', check: (v) => (/^[0-9+\-\s]{6,15}$/.test(v) ? true : 'Enter a valid phone number') },
     designation: { label: 'Designation', check: isNonEmptyString },
-    departmentId: { label: 'Department', required: true, check: isNonEmptyString },
+    // The single-department deployment derives departmentId server-side, so it
+    // is accepted but never required from the client.
+    departmentId: { label: 'Department', check: isNonEmptyString },
     status: { label: 'Status', check: (v) => (['active', 'inactive'].includes(v.toLowerCase()) ? true : 'Status must be active or inactive'), transform: (v) => String(v).toLowerCase() },
   },
   subject: {

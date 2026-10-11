@@ -6,6 +6,7 @@ const { requireRole } = require('../middleware/auth');
 const { byRegisterNumber } = require('../utils/naturalSort');
 const { withTotals, MARKS_MAX } = require('./marks');
 const { computeAssignmentStatus } = require('../services/assignmentStatus');
+const { SINGLE_DEPARTMENT } = require('../config/department');
 
 const countBy = (rows) => rows.length;
 
@@ -92,7 +93,7 @@ router.get(
       base.system = {
         totalUsers: allUsers.length,
         activeUsers: allUsers.filter((u) => String(u.status || 'active').toLowerCase() === 'active').length,
-        scope: 'all departments',
+        scope: SINGLE_DEPARTMENT.departmentName,
       };
     }
 
@@ -196,7 +197,13 @@ router.get(
     const payload = {
       role,
       department: isAdmin
-        ? { allDepartments: true, total: countBy(departments) }
+        ? {
+            // Single-department deployment: the admin scope is that one department.
+            allDepartments: false,
+            departmentId: SINGLE_DEPARTMENT.departmentId,
+            departmentName: SINGLE_DEPARTMENT.departmentName,
+            total: countBy(departments),
+          }
         : {
             departmentId: departmentId || '',
             departmentName: (departments.find((d) => String(d.departmentId) === String(departmentId)) || {}).departmentName || req.user.departmentName || '',

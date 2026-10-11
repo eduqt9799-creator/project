@@ -4,6 +4,7 @@ const dataService = require('../services/dataService');
 const { requireRole, actorOf } = require('../middleware/auth');
 const { asyncHandler, badRequest, forbidden, notFound } = require('../middleware/error');
 const { validate, SPECS } = require('../utils/validate');
+const { SINGLE_DEPARTMENT } = require('../config/department');
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -57,11 +58,11 @@ router.post(
     const { errors, data } = validate(req.body, SPECS.announcement);
     if (Object.keys(errors).length) throw badRequest('Please correct the highlighted fields.', errors);
 
-    // Department is always derived from the authenticated account.
-    const departmentId = req.user.role === 'admin' ? String(req.body.departmentId || '') : String(req.user.departmentId || '');
-    if (req.user.role !== 'admin' && req.body.departmentId && String(req.body.departmentId) !== departmentId) {
-      throw forbidden('You cannot publish announcements for another department.');
-    }
+    // Single-department deployment: a department announcement is always CS01. An
+    // admin may still publish a global (department-less) notice by omitting it.
+    const departmentId = req.user.role === 'admin'
+      ? (req.body.departmentId ? SINGLE_DEPARTMENT.departmentId : '')
+      : SINGLE_DEPARTMENT.departmentId;
     if (req.user.role === 'faculty' && data.targetRole !== 'faculty' && data.targetRole !== 'all') {
       throw forbidden('Faculty may only publish faculty/all announcements.');
     }
@@ -76,7 +77,7 @@ router.post(
       createdBy: req.user.userId,
       createdByName: req.user.name,
     };
-    const result = await appsScript.post('create_announcement', { record: data }, actorOf(req));
+    const result = await appsScript.post('create_announcement', { record }, actorOf(req));
 
     // Notify the intended audience (real users only).
     const users = await dataService.users();

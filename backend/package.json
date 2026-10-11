@@ -10,6 +10,7 @@
     "check": "node scripts/check-syntax.js && node scripts/check-schema-migration.js && node scripts/check-bridge-contract.js",
     "test": "node scripts/self-test.js",
     "bridge:check": "node scripts/check-bridge.js",
+    "department:migrate": "node scripts/migrate-department.js",
     "fix:materials": "node scripts/patch-materials-defaults.js"
   },
   "engines": {

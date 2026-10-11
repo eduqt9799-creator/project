@@ -21,6 +21,33 @@ empty in the new column until you fill it in.
 | Timestamps | ISO-8601 UTC (`createdAt`, `updatedAt`). Sheet timezone is `Asia/Kolkata`. |
 | Booleans | Written as the text `TRUE` / `FALSE`. The backend normalises on read. |
 | Department | `departmentId` + denormalised `departmentName` for readable exports. |
+
+## Single-department deployment
+
+This deployment serves exactly one department. The canonical values live in
+`backend/src/config/department.js` (mirrored by `frontend/src/config/department.js`
+and `SINGLE_DEPARTMENT` in `apps-script/Code.gs`):
+
+| Field | Value |
+| --- | --- |
+| `departmentId` | `CS01` |
+| `departmentCode` | `CS01` |
+| `departmentName` | `Computer Science and Engineering` |
+| `status` | `active` |
+
+`departmentId` is the permanent relationship key across the frontend, backend,
+Apps Script and Google Sheets; it equals `departmentCode` so the two can never
+drift apart in a record or a dropdown.
+
+The backend returns only this row from `GET /api/departments`, forces
+`departmentId` to `CS01` on every write, and refuses department
+create/update/delete. Non-admin accounts are always scoped to CS01.
+
+`ensureSingleDepartment_()` in `Code.gs` (or the backend's
+`POST /api/departments/migrate` / `npm run department:migrate -- --yes`) is the
+one-time migration: it collapses the Departments sheet to a single CS01 row and
+reassigns every department-scoped row (`Students`, `Users` except admins,
+`Faculty`, `HODs`, `Subjects`, ...) to CS01. It is idempotent.
 | Deletion | Referenced rows deactivate; only unreferenced rows are removed. |
 
 ## New sheets and columns on an existing spreadsheet

@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const dataService = require('../services/dataService');
+const { SINGLE_DEPARTMENT } = require('../config/department');
 
 const ROLE_PRIORITY = ['student', 'faculty', 'hod', 'admin'];
 
@@ -56,13 +57,17 @@ const authenticateUser = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'This account is deactivated.' });
     }
 
+    const role = String(user.role || '').toLowerCase();
+    // The deployment serves one department, so a non-admin session is always
+    // scoped to it; this keeps reads, writes and bridge actor checks consistent
+    // even before the sheet migration has rewritten a legacy department value.
     req.user = {
       userId: user.userId,
       email: user.email,
       name: user.name,
-      role: String(user.role || '').toLowerCase(),
-      departmentId: user.departmentId || '',
-      departmentName: user.departmentName || '',
+      role,
+      departmentId: role === 'admin' ? '' : SINGLE_DEPARTMENT.departmentId,
+      departmentName: role === 'admin' ? '' : SINGLE_DEPARTMENT.departmentName,
       status: user.status || 'active',
       profile: user,
     };

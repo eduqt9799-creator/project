@@ -6,6 +6,7 @@ const { asyncHandler, badRequest, forbidden, notFound } = require('../middleware
 const { validate, SPECS } = require('../utils/validate');
 const { byRegisterNumber, naturalCompare } = require('../utils/naturalSort');
 const { hashPassword } = require('../services/crudFactory');
+const { SINGLE_DEPARTMENT } = require('../config/department');
 
 /** Password hashes are never returned to the client. */
 const safeUser = (u) => ({
@@ -47,12 +48,17 @@ router.post(
   asyncHandler(async (req, res) => {
     const { errors, data } = validate(req.body, SPECS.adminUser);
     if (Object.keys(errors).length) throw badRequest('Please correct the highlighted fields.', errors);
-    if (data.role !== 'admin' && !data.departmentId) {
-      throw badRequest('Department is required for student, faculty and HOD accounts.', { departmentId: 'Department is required' });
+
+    // Single-department deployment: a non-admin always belongs to the one
+    // department, and an admin belongs to none. A client-supplied department is
+    // never trusted.
+    if (data.role !== 'admin') {
+      data.departmentId = SINGLE_DEPARTMENT.departmentId;
+      data.departmentName = SINGLE_DEPARTMENT.departmentName;
+    } else {
+      data.departmentId = '';
+      data.departmentName = '';
     }
-    const departments = await dataService.departments();
-    const department = departments.find((d) => String(d.departmentId) === String(data.departmentId));
-    if (data.role !== 'admin' && !department) throw badRequest('Select a valid department.', { departmentId: 'Unknown department' });
 
     const users = await dataService.users();
     if (users.some((u) => String(u.email || '').toLowerCase() === data.email)) {
@@ -60,10 +66,7 @@ router.post(
     }
     const passwordHash = await hashPassword(data.password);
     delete data.password;
-    const record = {
-      ...data,
-      departmentName: department ? department.departmentName : '',
-    };
+    const record = { ...data };
     const result = await appsScript.post('create_user', { record, passwordHash });
     await appsScript.post('audit_log', {
       record: {

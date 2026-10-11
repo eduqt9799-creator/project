@@ -90,15 +90,51 @@ listed there.
 2. Sign in at the frontend with that email/password.
 3. Immediately change the password in **Security** - the bootstrap hash is
    rewritten as bcrypt on first change.
-4. Admin > Departments: add the real departments. Add staff, then students.
-   Creating a student/faculty/HOD profile provisions its login automatically, so
-   each account can sign in immediately with the password set at creation.
-5. Subjects, then **Subject Allocation**: an HOD assigns each subject to one
+4. Run the single-department migration (below) - every department-scoped row and
+   the Departments sheet become **CS01 / Computer Science and Engineering**.
+5. Create staff, then students. Creating a student/faculty/HOD profile
+   provisions its login automatically, so each account can sign in immediately
+   with the password set at creation.
+6. Subjects, then **Subject Allocation**: an HOD assigns each subject to one
    faculty member per semester. Until a subject is allocated it stays out of
    faculty view everywhere (material, attendance, assignments, marks, students),
    so this step is what makes the faculty screens useful.
-6. Check HOD > Control Center: every subject should show a teacher, and
+7. Check HOD > Control Center: every subject should show a teacher, and
    **unallocated** should be empty.
+
+## 4c. Single-department deployment
+
+This ERP serves one academic department. The canonical values are kept in three
+places, all in sync:
+
+```js
+// backend/src/config/department.js
+const SINGLE_DEPARTMENT = {
+  departmentId: 'CS01',
+  departmentCode: 'CS01',
+  departmentName: 'Computer Science and Engineering',
+  status: 'active',
+};
+```
+
+- `frontend/src/config/department.js` mirrors the display values (used as a
+  fallback on the read-only Departments page).
+- `apps-script/Code.gs` declares `SINGLE_DEPARTMENT` for the spreadsheet
+  migration.
+
+The backend only ever returns this one department from `GET /api/departments`,
+forces `departmentId` to CS01 on every write, and refuses department
+create/update/delete. Non-admin accounts are always scoped to CS01.
+
+**Migration of legacy rows** (reassigns every department-scoped row to CS01,
+removes other department rows, collapses Departments to one row; idempotent):
+
+1. From the Apps Script editor: Run > Run function > `setupSingleDepartment()`;
+   **or** once the `API_KEY` Script Property is set:
+2. From the backend: `npm run department:migrate -- --yes`;
+   **or** as an admin in the UI/API: `POST /api/departments/migrate`.
+
+Run it whenever the deployment's department changes or legacy rows are imported.
 
 ## 4b. Upgrading an existing deployment
 

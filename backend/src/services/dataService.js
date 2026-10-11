@@ -5,6 +5,7 @@
 const appsScript = require('./appsScriptClient');
 const cacheEpoch = require('./cacheEpoch');
 const { byRegisterNumber, naturalCompare } = require('../utils/naturalSort');
+const { SINGLE_DEPARTMENT, isSingleDepartment, canonicalDepartment } = require('../config/department');
 
 /**
  * Short-lived read cache.
@@ -160,7 +161,19 @@ module.exports = {
   students: () => list('students'),
   faculty: () => list('faculty'),
   hods: () => list('hods'),
-  departments: () => list('departments').then((rows) => rows.map(normalizeDepartment)),
+  /**
+   * The ERP has exactly one department. Rows for any other department are
+   * legacy data awaiting migration, so they are never surfaced to the UI; the
+   * canonical row is synthesized when the sheet has none yet.
+   */
+  departments: () =>
+    list('departments').then((rows) => {
+      const found = rows
+        .map(normalizeDepartment)
+        .find((d) => isSingleDepartment(d.departmentId) || isSingleDepartment(d.departmentCode));
+      return [canonicalDepartment(found)];
+    }),
+  singleDepartment: SINGLE_DEPARTMENT,
   subjects: () => list('subjects'),
   subjectAllocations: () => list('subject_allocations').then((rows) => rows.map(normalizeAllocation)),
   attendance: () => list('attendance'),

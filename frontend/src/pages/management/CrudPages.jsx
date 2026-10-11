@@ -11,6 +11,7 @@ import {
 } from '../../components/ui';
 import { IconEdit, IconPlus, IconRefresh, IconShield, IconTrash } from '../../components/Icons';
 import { SEMESTERS, DAYS } from '../student/index';
+import { SINGLE_DEPARTMENT } from '../../config/department';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const isEmailRule = { label: 'Email', required: true, check: (v) => (EMAIL_RE.test(String(v).trim()) ? true : 'Enter a valid email address') };
@@ -437,16 +438,16 @@ const FormControl = ({ field, value, error, required, onChange }) => {
 
 /* ------------------------------------------------------------- departments */
 
+/**
+ * The ERP serves exactly one department, so this page is read-only: the backend
+ * refuses department create/update/delete, and the one-time Apps Script
+ * migration reassigns legacy rows to the canonical department. If the sheet has
+ * not been migrated yet the canonical row is still shown here (the backend always
+ * returns it), keeping every dropdown and filter consistent.
+ */
 export const DepartmentsPage = ({ adminOnly = false }) => {
-  const { isAdmin } = useAuth();
-  const toast = useToast();
   const [params, setParams] = useState({ search: '' });
   const [state, setState] = useState({ loading: true, error: '', rows: [] });
-  const [editing, setEditing] = useState(null);
-  const [values, setValues] = useState({});
-  const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(null);
 
   const load = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: '' }));
@@ -460,64 +461,24 @@ export const DepartmentsPage = ({ adminOnly = false }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  const submit = async (event) => {
-    event.preventDefault();
-    const nextErrors = validate(values, {
-      departmentId: { label: 'Department ID', required: true, check: (v) => (/^[A-Za-z0-9-]{2,20}$/.test(String(v).trim()) ? true : 'Use 2-20 letters, digits or -') },
-      departmentCode: RULES.departmentCode,
-      departmentName: RULES.departmentName,
-    });
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) return;
-
-    setSaving(true);
-    try {
-      if (editing === 'new') {
-        await departmentsApi.create(values);
-        toast.success('Department created');
-      } else {
-        await departmentsApi.update(editing.departmentId, { departmentCode: values.departmentCode, departmentName: values.departmentName, status: values.status || 'active' });
-        toast.success('Department updated');
-      }
-      setEditing(null);
-      load();
-    } catch (error) {
-      if (error.fieldErrors) setErrors(error.fieldErrors);
-      toast.error('Could not save department', error.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const remove = async () => {
-    setSaving(true);
-    try {
-      const res = await departmentsApi.remove(deleting.departmentId);
-      toast.success(res.message || 'Department removed');
-      setDeleting(null);
-      load();
-    } catch (error) {
-      toast.error('Could not remove department', error.message);
-    } finally {
-      setSaving(false);
-    }
-  };
+  const rows = state.rows.length ? state.rows : [SINGLE_DEPARTMENT];
 
   return (
     <>
       <PageHeader
         title="Department Management"
-        subtitle={adminOnly ? 'Create, update and archive departments. Departments with records are deactivated, never deleted.' : 'Departments configured in the department data store.'}
-        actions={isAdmin ? <button type="button" className="btn btn-primary" onClick={() => { setEditing('new'); setValues({ status: 'active' }); setErrors({}); }}><IconPlus size={16} />Add department</button> : null}
+        subtitle={adminOnly
+          ? 'This ERP serves a single department. Departments are fixed at deployment; use the migration (POST /api/departments/migrate) to reassign legacy rows to it.'
+          : 'Departments configured in the department data store.'}
       />
       <Card>
-        <CardHeader title="Departments" actions={<div style={{ minWidth: 240 }}><SearchBar value={params.search} onChange={(v) => setParams((p) => ({ ...p, search: v }))} placeholder="Search departments" /></div>} />
+        <CardHeader title="Parts of the department data store" actions={<div style={{ minWidth: 240 }}><SearchBar value={params.search} onChange={(v) => setParams((p) => ({ ...p, search: v }))} placeholder="Search departments" /></div>} />
         <CardBody tight>
-          {state.loading ? <LoadingState label="Loading departments..." />
+          {state.loading ? <LoadingState label="Loading department..." />
             : state.error ? <ErrorState message={state.error} onRetry={load} />
             : (
               <DataTable
-                rows={state.rows}
+                rows={rows}
                 keyField="departmentId"
                 emptyTitle="No department records available."
                 columns={[
@@ -526,55 +487,11 @@ export const DepartmentsPage = ({ adminOnly = false }) => {
                   { key: 'departmentName', header: 'Department Name' },
                   { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
                   { key: 'createdAt', header: 'Created', render: (r) => (r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '—') },
-                  ...(isAdmin ? [{
-                    key: '__actions',
-                    header: 'Actions',
-                    className: 'actions',
-                    render: (r) => (
-                      <div style={{ display: 'inline-flex', gap: 6 }}>
-                        <button type="button" className="icon-btn" onClick={() => { setEditing(r); setValues({ departmentId: r.departmentId, departmentCode: r.departmentCode, departmentName: r.departmentName, status: r.status }); setErrors({}); }} aria-label="Edit department"><IconEdit size={17} /></button>
-                        <button type="button" className="icon-btn danger" onClick={() => setDeleting(r)} aria-label="Delete department"><IconTrash size={17} /></button>
-                      </div>
-                    ),
-                  }] : []),
                 ]}
               />
             )}
         </CardBody>
       </Card>
-
-      <Modal
-        open={editing !== null}
-        title={editing === 'new' ? 'Add department' : 'Edit department'}
-        onClose={() => setEditing(null)}
-        footer={(
-          <>
-            <button type="button" className="btn btn-secondary" onClick={() => setEditing(null)} disabled={saving}>Cancel</button>
-            <button type="submit" form="department-form" className="btn btn-primary" disabled={saving}>{saving ? <span className="spinner" /> : 'Save'}</button>
-          </>
-        )}
-      >
-        <form id="department-form" onSubmit={submit} noValidate>
-          <div className="form-grid">
-            <TextInput label="Department ID" required disabled={editing !== 'new'} value={values.departmentId || ''} onChange={(e) => setValues((p) => ({ ...p, departmentId: e.target.value }))} error={errors.departmentId} hint="Permanent identifier, e.g. CSE" />
-            <TextInput label="Department Code" required value={values.departmentCode || ''} onChange={(e) => setValues((p) => ({ ...p, departmentCode: e.target.value }))} error={errors.departmentCode} />
-            <TextInput label="Department Name" required className="span-2" value={values.departmentName || ''} onChange={(e) => setValues((p) => ({ ...p, departmentName: e.target.value }))} error={errors.departmentName} />
-            {editing !== 'new' ? (
-              <SelectInput label="Status" value={values.status || 'active'} onChange={(e) => setValues((p) => ({ ...p, status: e.target.value }))} options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]} />
-            ) : null}
-          </div>
-        </form>
-      </Modal>
-
-      <ConfirmDialog
-        open={deleting !== null}
-        title="Delete department"
-        message={`Delete ${deleting?.departmentName}? If students, faculty, HODs or subjects still reference it, the department is deactivated instead.`}
-        confirmLabel="Delete"
-        loading={saving}
-        onCancel={() => setDeleting(null)}
-        onConfirm={remove}
-      />
     </>
   );
 };

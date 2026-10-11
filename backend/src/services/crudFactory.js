@@ -8,6 +8,7 @@ const { ApiError, asyncHandler, notFound, badRequest, forbidden } = require('../
 const { naturalCompare } = require('../utils/naturalSort');
 const { loadStudentProfile } = require('../utils/studentScope');
 const { actorOf } = require('../middleware/auth');
+const { SINGLE_DEPARTMENT } = require('../config/department');
 
 const hashPassword = (plain) => bcrypt.hash(String(plain), env.bcryptRounds);
 
@@ -178,10 +179,12 @@ const crudFactory = (config) => {
       const { errors, data } = validate(req.body, createSpec);
       if (Object.keys(errors).length) throw badRequest('Please correct the highlighted fields.', errors);
 
-      // Department is ALWAYS derived from the authenticated session (never from the client body).
-      if (scopeField && !data[scopeField]) data[scopeField] = req.user.role === 'admin' ? '' : req.user.departmentId || '';
-      if (scopeField && data[scopeField] && req.user.role !== 'admin' && data[scopeField] !== req.user.departmentId) {
-        throw forbidden('You cannot create records for another department.');
+      // The deployment serves one department, so every record belongs to it -
+      // a departmentId in the client body is ignored rather than trusted.
+      if (scopeField === 'departmentId') {
+        data.departmentId = SINGLE_DEPARTMENT.departmentId;
+      } else if (scopeField && !data[scopeField]) {
+        data[scopeField] = req.user.role === 'admin' ? '' : req.user.departmentId || '';
       }
 
       const existing = await dataService[table]();
@@ -194,7 +197,8 @@ const crudFactory = (config) => {
       if (beforeCreate) await beforeCreate(data, req, null);
 
       const record = { ...(transformCreate ? transformCreate(data, req) : data) };
-      if (scopeField && req.user.role !== 'admin') record[scopeField] = req.user.departmentId || '';
+      if (scopeField === 'departmentId') record.departmentId = SINGLE_DEPARTMENT.departmentId;
+      else if (scopeField && req.user.role !== 'admin') record[scopeField] = req.user.departmentId || '';
 
       const result = await appsScript.post(createAction, { record }, actorOf(req));
       const created = (result && result.data) || null;
@@ -217,9 +221,8 @@ const crudFactory = (config) => {
       if (!existingRow) throw notFound(`${resource} not found`);
       if (!inScope(req.user, existingRow)) throw forbidden('You cannot modify records outside your department.');
 
-      if (scopeField && data[scopeField] && req.user.role !== 'admin' && data[scopeField] !== req.user.departmentId) {
-        throw forbidden('You cannot move records to another department.');
-      }
+      // Records can never move between departments: there is only one.
+      if (scopeField === 'departmentId') data.departmentId = SINGLE_DEPARTMENT.departmentId;
 
       assertUnique(all, data, req.user, req.params.id);
 

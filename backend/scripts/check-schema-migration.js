@@ -16,6 +16,7 @@
 const assert = require('assert');
 const path = require('path');
 const { FakeSheet, loadCode } = require('./gas-harness');
+const { verifyPassword } = require('../src/services/passwordHash');
 
 const CODE_GS = path.join(__dirname, '..', '..', 'apps-script', 'Code.gs');
 
@@ -180,6 +181,140 @@ const upsertUpdatesInPlace = () => {
   assert.strictEqual(rows[0].semester, 3);
 };
 
+// --------------------------------------------------------------- bootstrap admin
+
+const bootstrapAdminIsUsable = async () => {
+  const sheets = {};
+  const ctx = loadCode(CODE_GS, sheets);
+  ctx.setupSheets();
+  const message = ctx.createInitialAdmin_('admin9799@gmail.com', 'Administrator', 'pass@9799');
+  assert.match(message, /admin9799@gmail\.com/, 'the helper must report the created email');
+
+  const admins = ctx.readSheet_('Users').filter((u) => String(u.role).toLowerCase() === 'admin');
+  assert.strictEqual(admins.length, 1, 'exactly one admin row must be written');
+  assert.strictEqual(admins[0].email, 'admin9799@gmail.com');
+  assert.strictEqual(admins[0].status, 'active');
+  assert.ok(String(admins[0].passwordHash).startsWith('hmac-sha256$'), 'the bootstrap hash must use the documented format');
+  // The whole point: the backend must accept this hash for the given password.
+  assert.ok(await verifyPassword('pass@9799', admins[0].passwordHash), 'the bootstrap password must verify');
+  assert.ok(!(await verifyPassword('wrong-password', admins[0].passwordHash)), 'a wrong password must be rejected');
+};
+
+const bootstrapAdminDefaultsToTheProjectAdmin = async () => {
+  const sheets = {};
+  const ctx = loadCode(CODE_GS, sheets);
+  ctx.setupSheets();
+  const message = ctx.createInitialAdmin_();
+  assert.match(message, /admin9799@gmail\.com/);
+  const admin = ctx.readSheet_('Users')[0];
+  assert.ok(await verifyPassword('pass@9799', admin.passwordHash), 'the default password must verify');
+};
+
+const bootstrapAdminRefusesWhenOneExists = async () => {
+  const sheets = {};
+  const ctx = loadCode(CODE_GS, sheets);
+  ctx.setupSheets();
+  ctx.createInitialAdmin_();
+  const second = ctx.createInitialAdmin_('other@college.edu', 'Other', 'another-pass');
+  assert.match(second, /already exists/i, 'a second run must be refused, not overwrite the live admin');
+  assert.strictEqual(ctx.readSheet_('Users').filter((u) => String(u.role).toLowerCase() === 'admin').length, 1);
+};
+
+// ------------------------------------------------------------ single department
+
+/**
+ * A spreadsheet that predates the single-department deployment: two department
+ * rows (CSE, ECE) and rows in several tables still carrying the old values.
+ */
+const withLegacyDepartments = () => {
+  const sheets = {};
+  const ctx = loadCode(CODE_GS, sheets);
+  ctx.setupSheets();
+  ctx.createRows_('Departments', [
+    { departmentId: 'CSE', departmentCode: 'CSE', departmentName: 'Computer Science', status: 'active' },
+    { departmentId: 'ECE', departmentCode: 'ECE', departmentName: 'Electronics', status: 'active' },
+  ]);
+  ctx.createRows_('Students', [{
+    studentId: 'STU-1', registerNumber: 'STU-001', name: 'Asha', email: 'asha@college.edu',
+    semester: 3, departmentId: 'CSE', departmentName: 'Computer Science', status: 'active',
+  }]);
+  ctx.createRows_('Faculty', [{
+    facultyId: 'FAC-1', employeeId: 'FAC-001', name: 'Ravi', email: 'ravi@college.edu',
+    departmentId: 'ECE', departmentName: 'Electronics', status: 'active',
+  }]);
+  ctx.createRows_('Users', [
+    { userId: 'USR-ADMIN', name: 'Admin', email: 'admin@college.edu', role: 'admin', departmentId: '', departmentName: '', status: 'active' },
+    { userId: 'USR-ASHA', name: 'Asha', email: 'asha@college.edu', role: 'student', departmentId: 'CSE', departmentName: 'Computer Science', status: 'active' },
+  ]);
+  return ctx;
+};
+
+const migrationCollapsesDepartmentsToSingleRow = () => {
+  const ctx = withLegacyDepartments();
+  const report = ctx.ensureSingleDepartment_();
+  assert.strictEqual(report.departmentId, 'CS01');
+  const depts = ctx.readSheet_('Departments');
+  assert.strictEqual(depts.length, 1, 'exactly one department row may remain');
+  assert.strictEqual(depts[0].departmentId, 'CS01');
+  assert.strictEqual(depts[0].departmentCode, 'CS01');
+  assert.strictEqual(depts[0].departmentName, 'Computer Science and Engineering');
+  assert.strictEqual(depts[0].status, 'active');
+  assert.strictEqual(report.departmentRowsRemoved, 2, 'both legacy department rows are removed');
+};
+
+const migrationReassignsDepartmentScopedRows = () => {
+  const ctx = withLegacyDepartments();
+  ctx.ensureSingleDepartment_();
+  const student = ctx.readSheet_('Students')[0];
+  assert.strictEqual(student.departmentId, 'CS01');
+  assert.strictEqual(student.departmentName, 'Computer Science and Engineering');
+  assert.strictEqual(student.semester, 3, 'unrelated columns are preserved');
+  assert.strictEqual(student.name, 'Asha');
+  const faculty = ctx.readSheet_('Faculty')[0];
+  assert.strictEqual(faculty.departmentId, 'CS01');
+  assert.strictEqual(faculty.departmentName, 'Computer Science and Engineering');
+};
+
+const migrationLeavesAdminsDepartmentless = () => {
+  const ctx = withLegacyDepartments();
+  ctx.ensureSingleDepartment_();
+  const users = ctx.readSheet_('Users');
+  const admin = users.find((u) => String(u.role).toLowerCase() === 'admin');
+  const studentUser = users.find((u) => String(u.role).toLowerCase() === 'student');
+  assert.strictEqual(admin.departmentId, '', 'admin stays department-less');
+  assert.strictEqual(admin.departmentName, '');
+  assert.strictEqual(studentUser.departmentId, 'CS01', 'non-admin users are reassigned to CS01');
+  assert.strictEqual(studentUser.departmentName, 'Computer Science and Engineering');
+};
+
+const migrationIsIdempotent = () => {
+  const ctx = withLegacyDepartments();
+  ctx.ensureSingleDepartment_();
+  const before = JSON.stringify(ctx.readSheet_('Students'));
+  const second = ctx.ensureSingleDepartment_();
+  assert.strictEqual(second.usersReassigned + second.rowsReassigned, 0, 'a second run must not rewrite already-canonical rows');
+  assert.strictEqual(JSON.stringify(ctx.readSheet_('Students')), before, 'a second run must leave rows untouched');
+  assert.strictEqual(ctx.readSheet_('Departments').length, 1);
+};
+
+const migrateBridgeActionRunsFromDoPost = () => {
+  const ctx = withLegacyDepartments();
+  const post = () => ctx.doPost({
+    postData: { contents: JSON.stringify({ action: 'migrate_single_department', key: 'test-key' }) },
+  });
+  post();
+  const payload = JSON.parse(ctx.__lastOutput);
+  assert.strictEqual(payload.success, true, 'the bridge action answers success');
+  assert.strictEqual(payload.data.departmentId, 'CS01');
+  assert.strictEqual(ctx.readSheet_('Departments').length, 1);
+  assert.strictEqual(ctx.readSheet_('Students')[0].departmentId, 'CS01');
+  // Idempotent through the same path.
+  post();
+  assert.strictEqual(ctx.readSheet_('Departments').length, 1);
+  assert.strictEqual(ctx.readSheet_('Departments')[0].departmentId, 'CS01');
+  assert.strictEqual(ctx.readSheet_('Students')[0].departmentId, 'CS01');
+};
+
 const tests = [
   ['reads keep existing rows aligned with their headers', readKeepsExistingRowsAligned],
   ['a column the sheet lacks reads empty, not undefined', missingColumnReadsEmptyNotUndefined],
@@ -192,18 +327,29 @@ const tests = [
   ['reordered columns still resolve by name', reorderedColumnsStillResolveByName],
   ['deleteRow_ resolves the primary key by name', deleteResolvesPrimaryKeyByName],
   ['upsertBy_ updates the matched row in place', upsertUpdatesInPlace],
+  ['createInitialAdmin_ writes a login the backend accepts', bootstrapAdminIsUsable],
+  ['createInitialAdmin_ defaults to the project admin', bootstrapAdminDefaultsToTheProjectAdmin],
+  ['createInitialAdmin_ refuses a second admin', bootstrapAdminRefusesWhenOneExists],
+  ['single-department migration collapses Departments to one canonical row', migrationCollapsesDepartmentsToSingleRow],
+  ['single-department migration reassigns every department-scoped row', migrationReassignsDepartmentScopedRows],
+  ['single-department migration leaves admins department-less', migrationLeavesAdminsDepartmentless],
+  ['single-department migration is idempotent', migrationIsIdempotent],
+  ['migrate_single_department runs through doPost', migrateBridgeActionRunsFromDoPost],
 ];
 
-let failed = 0;
-for (const [name, test] of tests) {
-  try {
-    test();
-    process.stdout.write(`ok   ${name}\n`);
-  } catch (error) {
-    failed += 1;
-    process.stdout.write(`FAIL ${name}\n     ${error.message}\n`);
+const main = async () => {
+  let failed = 0;
+  for (const [name, test] of tests) {
+    try {
+      await test();
+      process.stdout.write(`ok   ${name}\n`);
+    } catch (error) {
+      failed += 1;
+      process.stdout.write(`FAIL ${name}\n     ${error.message}\n`);
+    }
   }
-}
+  process.stdout.write(`\n${tests.length - failed}/${tests.length} schema migration checks passed.\n`);
+  process.exit(failed ? 1 : 0);
+};
 
-process.stdout.write(`\n${tests.length - failed}/${tests.length} schema migration checks passed.\n`);
-process.exit(failed ? 1 : 0);
+main();

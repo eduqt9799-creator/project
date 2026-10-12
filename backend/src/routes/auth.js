@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const appsScript = require('../services/appsScriptClient');
 const dataService = require('../services/dataService');
 const { verifyPasswordLegacyAware } = require('../services/passwordHash');
-const { signToken, ROLE_PRIORITY, authenticateUser } = require('../middleware/auth');
+const { signToken, ROLE_PRIORITY, authenticateUser, actorOf } = require('../middleware/auth');
 const { asyncHandler, badRequest } = require('../middleware/error');
 const { validate, SPECS } = require('../utils/validate');
 const { SINGLE_DEPARTMENT } = require('../config/department');
@@ -21,7 +21,10 @@ const publicUser = (user) => ({
   userId: user.userId,
   name: user.name,
   email: user.email,
-  role: user.role,
+  // Roles are compared verbatim on the client ("admin", "hod", ...), so the
+  // stored casing is normalised here. Sheets rows created before role
+  // lowercasing existed can hold "Admin"/"HOD" and must behave identically.
+  role: String(user.role || '').toLowerCase(),
   departmentId: user.departmentId || '',
   departmentName: user.departmentName || '',
   status: user.status || 'active',
@@ -133,7 +136,7 @@ router.put(
     const ok = await verifyPasswordLegacyAware(currentPassword, user.passwordHash);
     if (!ok) throw badRequest('Current password is incorrect.', { currentPassword: 'Incorrect password' });
     const passwordHash = await bcrypt.hash(newPassword, 10);
-    await appsScript.post('update_user', { id: String(user.userId), record: { passwordHash } });
+    await appsScript.post('update_user', { id: String(user.userId), record: { passwordHash } }, actorOf(req));
     return res.json({ success: true, message: 'Password updated successfully' });
   })
 );
@@ -173,7 +176,7 @@ router.put(
     });
     if (!Object.keys(payload).length) throw badRequest('Nothing to update.');
 
-    const result = await appsScript.post('update_user', { id: String(req.user.userId), record: payload });
+    const result = await appsScript.post('update_user', { id: String(req.user.userId), record: payload }, actorOf(req));
 
     // Keep the linked Students/Faculty/HOD record in sync so name, email and phone
     // stay identical everywhere they are displayed.
@@ -196,7 +199,7 @@ router.put(
         const profilePatch = {};
         mirror.forEach((field) => { if (payload[field] !== undefined) profilePatch[field] = payload[field]; });
         if (Object.keys(profilePatch).length) {
-          await appsScript.post(`update_${linked.key.replace('Id', '')}`, { id: String(target[linked.key]), record: profilePatch });
+          await appsScript.post(`update_${linked.key.replace('Id', '')}`, { id: String(target[linked.key]), record: profilePatch }, actorOf(req));
         }
       }
     }

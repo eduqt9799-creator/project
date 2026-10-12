@@ -162,7 +162,7 @@ router.delete(
     if (req.user.role === 'faculty' && row.createdBy !== req.user.userId) {
       throw forbidden('Faculty may only remove announcements they created.');
     }
-    const result = await appsScript.post('delete_announcement', { id: String(req.params.id) });
+    const result = await appsScript.post('delete_announcement', { id: String(req.params.id) }, actorOf(req));
     await appsScript.post('audit_log', {
       record: {
         action: 'delete',

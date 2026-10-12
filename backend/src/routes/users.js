@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const appsScript = require('../services/appsScriptClient');
 const dataService = require('../services/dataService');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, actorOf } = require('../middleware/auth');
 const { asyncHandler, badRequest, forbidden, notFound } = require('../middleware/error');
 const { validate, SPECS } = require('../utils/validate');
 const { byRegisterNumber, naturalCompare } = require('../utils/naturalSort');
@@ -13,7 +13,7 @@ const safeUser = (u) => ({
   userId: u.userId,
   name: u.name,
   email: u.email,
-  role: u.role,
+  role: String(u.role || '').toLowerCase(),
   departmentId: u.departmentId || '',
   departmentName: u.departmentName || '',
   status: u.status || 'active',
@@ -67,7 +67,7 @@ router.post(
     const passwordHash = await hashPassword(data.password);
     delete data.password;
     const record = { ...data };
-    const result = await appsScript.post('create_user', { record, passwordHash });
+    const result = await appsScript.post('create_user', { record, passwordHash }, actorOf(req));
     await appsScript.post('audit_log', {
       record: {
         action: 'create',
@@ -115,7 +115,7 @@ router.put(
     }
     if (!Object.keys(payload).length) throw badRequest('Nothing to update.');
 
-    const result = await appsScript.post('update_user', { id: String(req.params.id), record: payload });
+    const result = await appsScript.post('update_user', { id: String(req.params.id), record: payload }, actorOf(req));
     await appsScript.post('audit_log', {
       record: {
         action: 'update',
@@ -156,7 +156,7 @@ router.delete(
       notifications.some((n) => String(n.userId || '') === String(row.userId));
 
     if (referenced) {
-      await appsScript.post('update_user', { id: String(req.params.id), record: { status: 'inactive' } });
+      await appsScript.post('update_user', { id: String(req.params.id), record: { status: 'inactive' } }, actorOf(req));
       await appsScript.post('audit_log', {
         record: {
           action: 'update',
@@ -175,7 +175,7 @@ router.delete(
         deactivated: true,
       });
     }
-    await appsScript.post('delete_user', { id: String(req.params.id) });
+    await appsScript.post('delete_user', { id: String(req.params.id) }, actorOf(req));
     await appsScript.post('audit_log', {
       record: {
         action: 'delete',

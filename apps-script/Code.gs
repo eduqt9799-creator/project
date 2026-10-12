@@ -120,7 +120,7 @@ var SCHEMA = {
   ],
   Notifications: [
     'notificationId', 'userId', 'title', 'message', 'type', 'isRead', 'readAt',
-    'createdAt',
+    'createdAt', 'link', 'entityType', 'entityId',
   ],
   AuditLog: [
     'auditId', 'action', 'resource', 'recordId', 'performedBy',
@@ -175,6 +175,9 @@ var ID_PREFIX = {
  * write actions from a singular resource ("create_department") while reads use
  * the dataService table name ("departments"). Capitalising the token instead
  * would yield `Department`, which is not a sheet, so the mapping is explicit.
+ *
+ * The backend sends lowercase action names; the lookup is still lowered here so
+ * "create_HOD", "create_hod" and "create_Hods" all resolve to the same sheet.
  */
 var TABLE_BY_RESOURCE = {
   user: 'Users',
@@ -541,13 +544,18 @@ function assertDepartment_(table, record, id, actor) {
  * Send in-app notifications only to active users in the same department.
  * The frontend must read the Notifications sheet for these to appear in the UI.
  */
-function notifyDepartment_(departmentId, title, message, type, targetRoles) {
+function notifyDepartment_(departmentId, title, message, type, targetRoles, entity) {
   var dept = String(departmentId || '').trim();
   if (!dept) return [];
   var allowed = (targetRoles || ['student', 'faculty', 'hod'])
     .map(function (role) { return String(role).toLowerCase(); });
   var users = readSheet_('Users');
   var now = nowIso_();
+  // Deep-link target for the notification, so the student portal can open the
+  // actual content record instead of a dead-end text line.
+  var link = (entity && entity.link) || '';
+  var entityType = (entity && entity.entityType) || '';
+  var entityId = (entity && entity.entityId) || '';
   var notifications = users.filter(function (user) {
     var role = String(user.role || '').toLowerCase();
     var status = String(user.status || 'active').toLowerCase();
@@ -563,7 +571,10 @@ function notifyDepartment_(departmentId, title, message, type, targetRoles) {
       type: type || 'update',
       isRead: 'FALSE',
       readAt: '',
-      createdAt: now
+      createdAt: now,
+      link: link,
+      entityType: entityType,
+      entityId: entityId
     };
   });
   return notifications.length ? createRows_('Notifications', notifications) : [];
@@ -591,7 +602,10 @@ function notifyAttendanceStudents_(records) {
         type: 'attendance',
         isRead: 'FALSE',
         readAt: '',
-        createdAt: nowIso_()
+        createdAt: nowIso_(),
+        link: '/student/attendance',
+        entityType: 'attendance',
+        entityId: String(record.attendanceId || record.studentId || record.registerNumber || '')
       }]));
     }
   });
@@ -893,7 +907,7 @@ function tableForAction_(action) {
   var name = String(action || '');
   var match = /^(?:create|update|delete)_(.+)$/.exec(name);
   var resource = match ? match[1] : name;
-  return TABLE_BY_RESOURCE[resource] || null;
+  return TABLE_BY_RESOURCE[resource.toLowerCase()] || null;
 }
 
 function json_(payload) {
@@ -1017,20 +1031,23 @@ function doPost(e) {
           notifyDepartment_(item.departmentId, 'New study material',
             String(item.title || item.fileName || 'A new material') + ' is available for ' +
               String(item.subjectName || item.subjectCode || 'your subject') + '.',
-            'material', ['student', 'faculty', 'hod']);
+            'material', ['student', 'faculty', 'hod'],
+            { link: '/student/materials', entityType: 'material', entityId: item.materialId });
         });
       } else if (table === 'Assignments') {
         created.forEach(function (item) {
           notifyDepartment_(item.departmentId, 'New assignment',
             String(item.title || 'An assignment') + ' has been posted for ' +
               String(item.subjectName || item.subjectCode || 'your subject') + '.',
-            'assignment', ['student', 'faculty', 'hod']);
+            'assignment', ['student', 'faculty', 'hod'],
+            { link: '/student/assignments', entityType: 'assignment', entityId: item.assignmentId });
         });
       } else if (table === 'Announcements') {
         created.forEach(function (item) {
           notifyDepartment_(item.departmentId, item.title || 'Department announcement',
             item.description || 'A new department announcement is available.',
-            'announcement', ['student', 'faculty', 'hod']);
+            'announcement', ['student', 'faculty', 'hod'],
+            { link: '/student/announcements', entityType: 'announcement', entityId: item.announcementId });
         });
       }
 
@@ -1048,15 +1065,18 @@ function doPost(e) {
       if (table === 'Materials') {
         notifyDepartment_(updated.departmentId, 'Study material updated',
           String(updated.title || updated.fileName || 'A study material') + ' has been updated.',
-          'material', ['student', 'faculty', 'hod']);
+          'material', ['student', 'faculty', 'hod'],
+          { link: '/student/materials', entityType: 'material', entityId: updated.materialId });
       } else if (table === 'Assignments') {
         notifyDepartment_(updated.departmentId, 'Assignment updated',
           String(updated.title || 'An assignment') + ' has been updated.',
-          'assignment', ['student', 'faculty', 'hod']);
+          'assignment', ['student', 'faculty', 'hod'],
+          { link: '/student/assignments', entityType: 'assignment', entityId: updated.assignmentId });
       } else if (table === 'Announcements') {
         notifyDepartment_(updated.departmentId, updated.title || 'Announcement updated',
           updated.description || 'A department announcement has been updated.',
-          'announcement', ['student', 'faculty', 'hod']);
+          'announcement', ['student', 'faculty', 'hod'],
+          { link: '/student/announcements', entityType: 'announcement', entityId: updated.announcementId });
       }
       return ok_(table + ' updated.', updated);
     }

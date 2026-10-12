@@ -2,7 +2,7 @@ const router = require('express').Router();
 const dataService = require('../services/dataService');
 const { crudFactory } = require('../services/crudFactory');
 const { syncProfileAccount } = require('../services/accountService');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, actorOf } = require('../middleware/auth');
 const { SPECS, withoutPassword } = require('../utils/validate');
 const { byRegisterNumber } = require('../utils/naturalSort');
 const { asyncHandler, forbidden } = require('../middleware/error');
@@ -12,8 +12,8 @@ const { resolveFacultyRow, allocationsFor } = require('../utils/facultyScope');
 const STUDENT_CREATE = { ...SPECS.student };
 const STUDENT_UPDATE = withoutPassword(SPECS.student);
 
-const syncAccount = (resource) => async ({ record, previous, password, action }) => {
-  await syncProfileAccount({ resource, record: { ...(previous || {}), ...record }, previous, password, action });
+const syncAccount = (resource) => async ({ req, record, previous, password, action }) => {
+  await syncProfileAccount({ resource, record: { ...(previous || {}), ...record }, previous, password, action, actor: actorOf(req) });
 };
 
 /**

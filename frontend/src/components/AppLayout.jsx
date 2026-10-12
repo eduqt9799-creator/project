@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { notificationsApi } from '../services/api';
+import { notificationRoute } from '../utils/notifications';
 import {
   IconAttendance, IconBell, IconBook, IconBooks, IconBuilding, IconCalendar, IconClipboard,
   IconDashboard, IconDownload, IconExam, IconLogout, IconMarks, IconMegaphone, IconMenu,
@@ -190,6 +191,13 @@ const NotificationBell = () => {
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const { role } = useAuth();
+
+  const openNotification = (n) => {
+    const target = notificationRoute(role, n);
+    setOpen(false);
+    if (target) navigate(target);
+  };
 
   const load = () => {
     notificationsApi.list().then((res) => {
@@ -238,14 +246,20 @@ const NotificationBell = () => {
               ) : (
                 <div className="notif-list">
                   {items.slice(0, 12).map((n) => (
-                    <div key={n.notificationId} className={`notif-item ${n.isRead ? '' : 'unread'}`}>
+                    <button
+                      key={n.notificationId}
+                      type="button"
+                      className={`notif-item ${n.isRead ? '' : 'unread'}`}
+                      style={{ width: '100%', textAlign: 'left', border: 0, background: 'none', cursor: notificationRoute(role, n) ? 'pointer' : 'default' }}
+                      onClick={() => openNotification(n)}
+                    >
                       <span className={`notif-bullet ${n.isRead ? 'read' : ''}`} aria-hidden="true" />
                       <div style={{ minWidth: 0 }}>
                         <div className="notif-title">{n.title}</div>
                         <div className="notif-message">{n.message}</div>
                         <div className="notif-time">{new Date(n.createdAt).toLocaleString()}</div>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}

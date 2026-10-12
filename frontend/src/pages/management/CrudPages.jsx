@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
-  departmentsApi, examsApi, facultyApi, hodsApi, materialsApi, marksApi,
+  assignmentsApi, departmentsApi, examsApi, facultyApi, hodsApi, materialsApi, marksApi,
   studentsApi, subjectAllocationsApi, subjectsApi, timetableApi, usersApi,
 } from '../../services/api';
 import {

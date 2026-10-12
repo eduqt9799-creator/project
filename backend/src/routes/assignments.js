@@ -4,9 +4,10 @@ const dataService = require('../services/dataService');
 const { crudFactory } = require('../services/crudFactory');
 const { SPECS } = require('../utils/validate');
 const { asyncHandler, badRequest, forbidden, notFound } = require('../middleware/error');
-const { requireRole } = require('../middleware/auth');
+const { requireRole, actorOf } = require('../middleware/auth');
 const { assertCanWriteForSubject } = require('../utils/facultyScope');
 const { computeAssignmentStatus } = require('../services/assignmentStatus');
+const { loadStudentProfile } = require('../utils/studentScope');
 
 const router = express.Router();
 
@@ -43,9 +44,10 @@ const findSubmission = (submissions, assignmentId, student) =>
         String(s.registerNumber || '').toUpperCase() === String(student.registerNumber || '').toUpperCase())
   );
 
-const studentSemesterScope = (row, req) => {
+const studentSemesterScope = async (row, req) => {
   if (req.user.role !== 'student') return true;
-  const semester = req.user.profile && req.user.profile.semester !== undefined ? Number(req.user.profile.semester) : null;
+  const profile = await loadStudentProfile(req, dataService);
+  const semester = profile && profile.semester !== undefined ? Number(profile.semester) : null;
   if (semester === null || Number.isNaN(semester)) return false;
   return Number(row.semester) === semester;
 };
@@ -218,7 +220,7 @@ router.delete(
     const submissions = await dataService.assignmentSubmissions();
     const submission = findSubmission(submissions, row.assignmentId, me);
     if (!submission) throw notFound('You have not submitted this assignment.');
-    await appsScript.post('delete_assignment_submission', { id: String(submission.submissionId) });
+    await appsScript.post('delete_assignment_submission', { id: String(submission.submissionId) }, actorOf(req));
     return res.json({ success: true, message: 'Submission withdrawn' });
   })
 );

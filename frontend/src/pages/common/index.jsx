@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { authApi, departmentsApi, notificationsApi } from '../../services/api';
+import { notificationRoute } from '../../utils/notifications';
 import {
   Alert, Badge, Card, CardBody, CardHeader, DataTable, EmptyState, ErrorState, Grid, LoadingState,
   Modal, PageHeader, PasswordInput, SelectInput, StatCard, StatusBadge, TextArea, TextInput, useToast,
@@ -34,11 +36,19 @@ const formatDateTime = (value) => {
 
 export const NotificationsPage = ({ canSend }) => {
   const { role } = useAuth();
+  const navigate = useNavigate();
   const toast = useToast();
   const allowSend = canSend ?? ['admin', 'hod'].includes(role);
   const [filter, setFilter] = useState('all');
   const [type, setType] = useState('');
   const [state, setState] = useState({ loading: true, error: '', rows: [], unread: 0 });
+
+  const openNotification = (n) => {
+    if (!n || !n.notificationId) return;
+    markRead(n);
+    const target = notificationRoute(role, n);
+    if (target) navigate(target);
+  };
 
   const load = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: '' }));
@@ -107,7 +117,12 @@ export const NotificationsPage = ({ canSend }) => {
                 <div className="notification-list">
                   {state.rows.map((n) => (
                     <article key={n.notificationId} className={`notification-item ${toBool(n.isRead) ? 'read' : 'unread'}`}>
-                      <div className="notification-main">
+                      <button
+                        type="button"
+                        className="notification-main"
+                        onClick={() => openNotification(n)}
+                        title={notificationRoute(role, n) ? 'Open this notification' : undefined}
+                      >
                         <div className="notification-title">
                           <Badge tone={typeTone(n.type)}>{n.type || 'info'}</Badge>
                           <span className="strong">{n.title}</span>
@@ -117,8 +132,11 @@ export const NotificationsPage = ({ canSend }) => {
                         <div className="notification-meta">
                           {formatDateTime(n.createdAt)}
                           {n.readAt ? ` · read ${formatDateTime(n.readAt)}` : ''}
-                          {n.link ? <> · <a href={n.link} target="_blank" rel="noreferrer">Open</a></> : null}
+                          {notificationRoute(role, n) ? ' · Open content →' : ''}
                         </div>
+                      </button>
+                      <div className="notification-meta">
+                        {n.link ? <a href={n.link} target="_blank" rel="noreferrer">Open</a> : null}
                       </div>
                       {!toBool(n.isRead) ? (
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => markRead(n)}>Mark read</button>

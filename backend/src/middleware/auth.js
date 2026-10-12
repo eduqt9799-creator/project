@@ -69,7 +69,13 @@ const authenticateUser = async (req, res, next) => {
       departmentId: role === 'admin' ? '' : SINGLE_DEPARTMENT.departmentId,
       departmentName: role === 'admin' ? '' : SINGLE_DEPARTMENT.departmentName,
       status: user.status || 'active',
-      profile: user,
+      // NOTE: `req.user.profile` is intentionally NOT the Users sheet row here.
+      // Several student-scoped routes (crudFactory#applyStudentScope, the
+      // materials/assignments extra-filters) treat `req.user.profile` as the
+      // Students sheet profile, which carries the `semester` used for scoping.
+      // The Users row has no semester, and trusting it made every real
+      // semester-scoped record invisible to students. It is resolved (and
+      // cached) by `loadStudentProfile` instead.
     };
 
     if (!ROLE_PRIORITY.includes(req.user.role)) {

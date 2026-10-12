@@ -3,6 +3,7 @@ const { crudFactory } = require('../services/crudFactory');
 const { syncProfileAccount } = require('../services/accountService');
 const { SPECS, withoutPassword } = require('../utils/validate');
 const { byEmployeeId } = require('../utils/naturalSort');
+const { actorOf } = require('../middleware/auth');
 
 const COMMON = {
   read: ['admin', 'hod'],
@@ -12,8 +13,8 @@ const COMMON = {
 };
 
 /** Keeps the faculty login account aligned with the faculty profile. */
-const syncAccount = async ({ record, previous, password, action }) => {
-  await syncProfileAccount({ resource: 'Faculty', record: { ...(previous || {}), ...record }, previous, password, action });
+const syncAccount = async ({ req, record, previous, password, action }) => {
+  await syncProfileAccount({ resource: 'Faculty', record: { ...(previous || {}), ...record }, previous, password, action, actor: actorOf(req) });
 };
 
 router.use(

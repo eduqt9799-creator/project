@@ -44,9 +44,11 @@ const profileIdFieldFor = (role) => userIdKeyFor(role);
  * @param {string} [options.password]    plain password supplied by the operator
  * @param {string} [options.action]      'create' | 'update' | 'delete' | 'deactivate'
  * @param {object} [options.previous]    profile record before the change
+ * @param {string} [options.actor]       actor token passed to the bridge so the
+ *                                        Users write passes the department check
  * @returns {Promise<object|null>} the account record, or null when nothing changed
  */
-const syncProfileAccount = async ({ resource, record, password, action = 'update', previous }) => {
+const syncProfileAccount = async ({ resource, record, password, action = 'update', previous, actor }) => {
   const role = ROLE_BY_RESOURCE[resource];
   if (!role || !record) return null;
 
@@ -67,7 +69,7 @@ const syncProfileAccount = async ({ resource, record, password, action = 'update
   // Removing or deactivating a profile must never leave a working login behind.
   if (action === 'delete' || action === 'deactivate' || status === 'inactive') {
     if (!account || String(account.status || 'active').toLowerCase() === 'inactive') return null;
-    await appsScript.post('update_user', { id: String(account.userId), record: { status: 'inactive' } });
+    await appsScript.post('update_user', { id: String(account.userId), record: { status: 'inactive' } }, actor);
     return { ...account, status: 'inactive' };
   }
 
@@ -75,18 +77,22 @@ const syncProfileAccount = async ({ resource, record, password, action = 'update
     // No account yet: create one so the person can actually sign in.
     if (!email) return null;
     const passwordHash = await hashPassword(password || 'ChangeMe@123');
-    const created = await appsScript.post('create_user', {
-      record: {
-        name,
-        email,
-        role,
-        departmentId,
-        departmentName: record.departmentName || previous?.departmentName || '',
-        status: 'active',
-        [idField]: profileId,
+    const created = await appsScript.post(
+      'create_user',
+      {
+        record: {
+          name,
+          email,
+          role,
+          departmentId,
+          departmentName: record.departmentName || previous?.departmentName || '',
+          status: 'active',
+          [idField]: profileId,
+        },
+        passwordHash,
       },
-      passwordHash,
-    });
+      actor
+    );
     return created && created.data ? created.data : { name, email, role, departmentId, status: 'active' };
   }
 
@@ -98,7 +104,7 @@ const syncProfileAccount = async ({ resource, record, password, action = 'update
   if (password) patch.passwordHash = await hashPassword(password);
   if (!Object.keys(patch).length) return null;
 
-  const result = await appsScript.post('update_user', { id: String(account.userId), record: patch });
+  const result = await appsScript.post('update_user', { id: String(account.userId), record: patch }, actor);
   return result && result.data ? result.data : { ...account, ...patch };
 };
 

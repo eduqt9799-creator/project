@@ -32,9 +32,9 @@ const loadStudentProfile = async (req, dataService) => {
  */
 const studentSemesterScope = async (row, req, dataService) => {
   if (req.user.role !== 'student') return true;
-  const profile = req.user.profile || (await loadStudentProfile(req, dataService));
+  const profile = await loadStudentProfile(req, dataService);
   const semester = profile ? Number(profile.semester) : null;
-  if (semester === null || Number.isNaN(semester)) return false;
+  if (semester === null || !Number.isFinite(semester)) return false;
   if (row.semester === undefined || row.semester === '') return true;
   return Number(row.semester) === semester;
 };

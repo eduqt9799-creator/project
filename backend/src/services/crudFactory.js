@@ -16,14 +16,18 @@ const hashPassword = (plain) => bcrypt.hash(String(plain), env.bcryptRounds);
  * Students only ever see rows that belong to their own semester. The profile is
  * resolved once per request and cached on `req.profile`; if it cannot be
  * resolved nothing is returned rather than leaking another semester's rows.
+ *
+ * The profile is always resolved via `loadStudentProfile` — never read straight
+ * from `req.user.profile`, because some middlewares used to stamp the Users row
+ * (which has no `semester`) onto that field, making every real row invisible.
  */
 const applyStudentScope = async (rows, req) => {
   if (req.user.role !== 'student') return rows;
   const noSemester = (row) => row.semester === undefined || row.semester === '';
-  const profile = req.user.profile || (await loadStudentProfile(req, dataService));
+  const profile = await loadStudentProfile(req, dataService);
   if (!profile) return rows.filter(noSemester);
   const semester = Number(profile.semester);
-  if (Number.isNaN(semester)) return rows.filter(noSemester);
+  if (!Number.isFinite(semester)) return rows.filter(noSemester);
   return rows.filter((row) => noSemester(row) || Number(row.semester) === semester);
 };
 
@@ -48,9 +52,15 @@ const crudFactory = (config) => {
     uniqueKeys = [],
     roles,
     scopeField = 'departmentId',
-    createAction = `create_${resource}`,
-    updateAction = `update_${resource}`,
-    deleteAction = `delete_${resource}`,
+    // Action names are case-insensitive on the bridge, but the canonical form is
+    // lowercase: the deployed Apps Script maps "create_hod"/"create_student"/...
+    // (lowercase, singular or plural) to a sheet, while "create_HOD" (the raw
+    // PascalCase resource) hits no entry and is refused as
+    // "Unknown POST action: create_HOD". Lowercase keeps the backend and the
+    // bridge contract in sync without expecting an Apps Script redeploy.
+    createAction = `create_${resource.toLowerCase()}`,
+    updateAction = `update_${resource.toLowerCase()}`,
+    deleteAction = `delete_${resource.toLowerCase()}`,
     requiredReferences = [],
     sort = (a, b) => naturalCompare(a[idField] || '', b[idField] || ''),
     auditOn = ['create', 'update', 'delete'],
@@ -274,7 +284,7 @@ const crudFactory = (config) => {
         });
       }
 
-      const result = await appsScript.post(deleteAction, { id: String(req.params.id) });
+      const result = await appsScript.post(deleteAction, { id: String(req.params.id) }, actorOf(req));
       if (afterDelete) await afterDelete({ req, record: existingRow, previous: existingRow, action: 'delete' });
       await writeAudit(req, 'delete', req.params.id, prepareDelete ? prepareDelete(existingRow) : {});
       return res.json({ success: true, message: `${resource} deleted successfully`, data: result && result.data });

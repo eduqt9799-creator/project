@@ -44,7 +44,7 @@ router.use(
     searchFields: ['subjectCode', 'subjectName', 'departmentName', 'departmentCode'],
     uniqueKeys: [['subjectCode', 'semester', 'departmentId']],
     roles: {
-      read: ['admin', 'hod', 'faculty'],
+      read: ['admin', 'hod', 'faculty', 'student'],
       create: ['admin', 'hod'],
       update: ['admin', 'hod'],
       delete: ['admin'],

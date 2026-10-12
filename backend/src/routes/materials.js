@@ -10,6 +10,7 @@ const {
   allocationsFor,
   teachableSubjects,
 } = require('../utils/facultyScope');
+const { loadStudentProfile } = require('../utils/studentScope');
 
 /**
  * Study materials.
@@ -110,7 +111,7 @@ router.use(
       if (req.user.role === 'admin' || req.user.role === 'hod') return true;
       const context = {};
       if (req.user.role === 'student') {
-        const profile = req.user.profile || {};
+        const profile = (await loadStudentProfile(req, dataService)) || {};
         context.semester = Number(profile.semester) || 0;
         context.departmentId = String(profile.departmentId || req.user.departmentId || '');
         if (!req._studentSubjectCodes) {
